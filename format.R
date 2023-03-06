@@ -1,13 +1,13 @@
 source("config.R")
 
-globalVariables(c(years, pollutants))
+globalVariables(c(years, pollutants, year_range_sizes))
 
 library(data.table)
 library(lubridate)
 library(tidyverse)
 
-get_year_raw_df <- function(year) {
-    df <- tibble::tibble()
+read_raw_df <- function(year) {
+    df <- tibble()
 
     for (pollutant in pollutants) {
         file_path <- paste0("data/raw/", pollutant, "_", year, ".csv")
@@ -62,11 +62,13 @@ get_year_raw_df <- function(year) {
     df
 }
 
-# Make `tidy`-ed hourly CSVs
+# Make `tidy`-ed hourly CSVs, and aggregate them into daily and monthly CSVs
 for (year in years) {
     hourly_csv_file <- paste0("data/build/CA_NAPS_Hourly_", year, ".csv")
+    daily_csv_file <- paste0("data/build/CA_NAPS_Daily_", year, ".csv")
+    monthly_csv_file <- paste0("data/build/CA_NAPS_Monthly_", year, ".csv")
 
-    hourly_df <- get_year_raw_df(year) |>
+    hourly_df <- read_raw_df(year) |>
         pivot_longer("01":"24", names_to = "Hour", values_to = "Value") |>
         filter(Value >= 0) |>
         select(c("Pollutant", "NAPSID", "City", "Territory",
@@ -74,23 +76,25 @@ for (year in years) {
         drop_na()
 
     fwrite(hourly_df |> mutate(Value = round(Value, 2)), hourly_csv_file)
-}
 
-# ...and merge them into daily CSVs
-for (year in years) {
-    hourly_csv_file <- paste0("data/build/CA_NAPS_Hourly_", year, ".csv")
-    daily_csv_file <- paste0("data/build/CA_NAPS_Daily_", year, ".csv")
-
-    daily_df <- read_csv(hourly_csv_file) |>
+    daily_df <- hourly_df |>
         group_by(Pollutant, NAPSID, City, Territory,
                  Latitude, Longitude, Date) |>
         summarize(Value = mean(Value))
 
     fwrite(daily_df |> mutate(Value = round(Value, 2)), daily_csv_file)
+
+    monthly_df <- hourly_df |>
+        mutate(Date = floor_date(Date, "month")) |>
+        group_by(Pollutant, NAPSID, City, Territory,
+                 Latitude, Longitude, Date) |>
+        summarize(Value = mean(Value))
+
+    fwrite(monthly_df |> mutate(Value = round(Value, 2)), monthly_csv_file)
 }
 
-# ...and aggregate them into year sets
-for (year_range_size in c(5, 10, 20)) {
+# ...and aggregate them into year sets, too
+for (year_range_size in year_range_sizes) {
     n_ranges <- length(years) %/% year_range_size
     year_ranges <- split(years,
                          rep(1:n_ranges, each = year_range_size))
@@ -100,7 +104,11 @@ for (year_range_size in c(5, 10, 20)) {
                                             min(year_range), "-",
                                             max(year_range), ".csv")
 
-        df <- tibble::tibble()
+        monthly_aggregated_csv_file <- paste0("data/build/CA_NAPS_Monthly_",
+                                              min(year_range), "-",
+                                              max(year_range), ".csv")
+
+        df <- tibble()
 
         for (year in year_range) {
             daily_csv_file <- paste0("data/build/CA_NAPS_Daily_", year, ".csv")
@@ -108,5 +116,14 @@ for (year_range_size in c(5, 10, 20)) {
         }
 
         fwrite(df, daily_aggregated_csv_file)
+
+        df <- tibble()
+
+        for (year in year_range) {
+            monthly_csv_file <- paste0("data/build/CA_NAPS_Monthly_", year, ".csv")
+            df <- rbind(df, read_csv(monthly_csv_file))
+        }
+
+        fwrite(df, monthly_aggregated_csv_file)
     }
 }

@@ -32,4 +32,6 @@ jobs:
       - name: Add built artifacts to release
         uses: softprops/action-gh-release@v1
         with:
-          files: data/build/CA_NAPS_Daily_*.csv
+          files: |
+            data/build/CA_NAPS_Daily_*.csv
+            data/build/CA_NAPS_Monthly_*.csv
